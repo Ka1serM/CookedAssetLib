@@ -1,7 +1,7 @@
 """Generates the source asset set and cooks it with each requested UE version.
 
 Usage: python cook_library.py 4.26 5.8 ...
-Layout: <LIBRARY_ROOT>/projects/<version> holds the generated project, <LIBRARY_ROOT>/library/<version> the cooked result.
+Layout: <LIBRARY_ROOT>/projects/<version> holds the generated project, <LIBRARY_ROOT>/library/<version> the paks and generation.json.
 """
 import json
 import shutil
@@ -11,7 +11,7 @@ from pathlib import Path
 
 LIBRARY_ROOT = Path("E:/UELibrary")
 ENGINE_ROOTS = [Path("C:/Program Files/Epic Games"), Path("C:/Epic Games")]
-GENERATOR = Path(__file__).with_name("generate_assets.py")
+GENERATOR = Path(__file__).resolve().with_name("generate_assets.py")
 PROJECT_NAME = "CookedLib"
 
 DEFAULT_ENGINE_INI = """[/Script/Engine.RendererSettings]
@@ -61,10 +61,22 @@ def generate(engine, uproject):
     run([editor_cmd(engine), uproject, f"-ExecutePythonScript={GENERATOR}", "-unattended", "-nosplash", "-nullrhi", "-stdout", "-FullStdOutLogOutput"])
 
 
-def cook(engine, uproject, output_dir):
-    shutil.rmtree(output_dir, ignore_errors=True)
+def read_generation_report(project_dir):
+    report = json.loads((project_dir / "Saved/generation.json").read_text())
+    failed = {name: error for name, error in report["generators"].items() if error != "ok"}
+    for name, error in failed.items():
+        print(f"generator {name} failed:\n{error}")
+    if failed:
+        sys.exit(f"generators failed: {', '.join(failed)}")
+
+
+def cook(engine, uproject, project_dir, output_dir):
     run([engine / "Engine/Build/BatchFiles/RunUAT.bat", "BuildCookRun", f"-project={uproject}", "-noP4", "-platform=Win64",
-         "-clientconfig=Development", "-cook", "-stage", "-pak", "-archive", f"-archivedirectory={output_dir}", "-unattended"])
+         "-clientconfig=Development", "-build", "-cook", "-stage", "-pak", "-unattended"])
+    (paks,) = project_dir.glob(f"Saved/StagedBuilds/*/{PROJECT_NAME}/Content/Paks")
+    shutil.rmtree(output_dir, ignore_errors=True)
+    shutil.copytree(paks, output_dir / "Paks")
+    shutil.copy(project_dir / "Saved/generation.json", output_dir)
 
 
 def main(versions):
@@ -73,7 +85,8 @@ def main(versions):
         project_dir = LIBRARY_ROOT / "projects" / version
         uproject = write_project(project_dir, version)
         generate(engine, uproject)
-        cook(engine, uproject, LIBRARY_ROOT / "library" / version)
+        read_generation_report(project_dir)
+        cook(engine, uproject, project_dir, LIBRARY_ROOT / "library" / version)
 
 
 if __name__ == "__main__":
