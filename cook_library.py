@@ -52,17 +52,21 @@ def write_project(project_dir, version):
     return path
 
 
-def run(command):
+def run(command, check=True):
     print(">", " ".join(str(part) for part in command), flush=True)
-    subprocess.run([str(part) for part in command], check=True)
+    subprocess.run([str(part) for part in command], check=check)
 
 
 def generate(engine, uproject):
-    run([editor_cmd(engine), uproject, f"-ExecutePythonScript={GENERATOR}", "-unattended", "-nosplash", "-nullrhi", "-stdout", "-FullStdOutLogOutput"])
+    # Some engine versions crash while the editor shuts down; generation.json is the verdict, not the exit code.
+    run([editor_cmd(engine), uproject, f"-ExecutePythonScript={GENERATOR}", "-unattended", "-nosplash", "-nullrhi", "-stdout", "-FullStdOutLogOutput"], check=False)
 
 
 def read_generation_report(project_dir):
-    report = json.loads((project_dir / "Saved/generation.json").read_text())
+    report_path = project_dir / "Saved/generation.json"
+    if not report_path.exists():
+        sys.exit("the editor exited without writing generation.json")
+    report = json.loads(report_path.read_text())
     failed = {name: error for name, error in report["generators"].items() if error != "ok"}
     for name, error in failed.items():
         print(f"generator {name} failed:\n{error}")
