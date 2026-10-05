@@ -100,6 +100,42 @@ def place_environment(row):
     editor_level.spawn_actor_from_class(unreal.PostProcessVolume, row.next_location()).set_editor_property("unbound", True)
 
 
+def grid_transforms(count, spacing, scale_step=0.0):
+    return [unreal.Transform(unreal.Vector(x * spacing, y * spacing, 0), unreal.Rotator(0, (x * 17 + y * 31) % 360, 0),
+                             unreal.Vector(*[1 + scale_step * ((x + y) % 3)] * 3))
+            for x in range(count) for y in range(count)]
+
+
+def instanced_actor(component_class, mesh, transforms, location):
+    actor = editor_level.spawn_actor_from_class(unreal.Actor, location)
+    component = unreal.new_object(component_class, actor, component_class.__name__)
+    component.set_static_mesh(mesh)
+    for transform in transforms:
+        component.add_instance(transform)
+    actor.set_editor_property("root_component", component)
+    actor.set_actor_location(location, False, False)
+    return actor
+
+
+def place_instancing(row):
+    start = row.next_location(0)
+    instanced_actor(unreal.InstancedStaticMeshComponent, load("StaticMesh", "SM_Cube"), grid_transforms(5, 120), start)
+    row.count += 3
+    instanced_actor(unreal.HierarchicalInstancedStaticMeshComponent, load("StaticMesh", "SM_Sphere"), grid_transforms(8, 110, 0.25), row.next_location(0))
+    row.count += 4
+    foliage_location = row.next_location(0)
+    sphere = load("StaticMesh", "SM_Sphere")
+    transforms = grid_transforms(6, 120, 0.2)
+    if hasattr(unreal.InstancedFoliageActor, "add_instances"):
+        foliage_type = create_asset("Foliage", "FT_Sphere", unreal.FoliageType_InstancedStaticMesh, unreal.FoliageType_InstancedStaticMeshFactory())
+        foliage_type.set_editor_property("mesh", sphere)
+        offset = foliage_location
+        unreal.InstancedFoliageActor.add_instances(editor_level.get_editor_world(), foliage_type, [
+            unreal.Transform(t.translation + offset, t.rotation.rotator(), t.scale3d) for t in transforms])
+    else:
+        instanced_actor(unreal.FoliageInstancedStaticMeshComponent, sphere, transforms, foliage_location)
+
+
 def generate():
     editor_level.new_level(SUB_LEVEL)
     editor_level.spawn_actor_from_object(load("StaticMesh", "SM_Sphere"), unreal.Vector(0, 0, 50))
@@ -107,7 +143,7 @@ def generate():
 
     editor_level.new_level(f"{ROOT}/Map/Showcase")
     placers = (("StaticMesh", place_meshes), ("Material", place_materials), ("Texture", place_textures), ("SkeletalMesh", place_skeletal),
-               ("Blueprint", place_blueprints), ("Audio", place_audio), ("Environment", place_environment))
+               ("Blueprint", place_blueprints), ("Audio", place_audio), ("Instancing", place_instancing), ("Environment", place_environment))
     for index, (label, place) in enumerate(placers):
         place(Row(label, index))
     unreal.EditorLevelUtils.add_level_to_world(editor_level.get_editor_world(), SUB_LEVEL, unreal.LevelStreamingDynamic)
